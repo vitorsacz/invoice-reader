@@ -1,0 +1,5 @@
+google-genai
+gspread
+pdfplumber
+python-dotenv
+gspread-formatting
