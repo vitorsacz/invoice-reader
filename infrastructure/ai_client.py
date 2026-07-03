@@ -10,28 +10,29 @@ def extract_transactions_with_ai(raw_text: str) -> str:
     client = genai.Client(api_key=api_key)
 
     prompt = """
-    Você é um extrator de dados financeiros. 
-    Analise o texto da fatura de cartão de crédito e extraia as informações no formato JSON.
+    Você é um extrator de dados financeiros de alta precisão. 
+    Analise o texto da fatura de cartão de crédito de qualquer banco e extraia as informações no formato JSON.
     
-    Regras:
-    1. Ignore pagamentos da fatura anterior e taxas (ex: IOF).
-    2. Identifique o nome do banco emissor da fatura.
-    3. Identifique o mês de referência da fatura (baseado na data de vencimento). Retorne APENAS o nome do mês em português, todo em letras minúsculas (ex: 'janeiro', 'fevereiro', 'julho').
-    4. Identifique o valor total da fatura.
-    5. Para cada transação, verifique se há um indicador de parcela (ex: 01/10, 08/12, 2/03) no nome do estabelecimento.
+    Regras estritas:
+    1. Ignore pagamentos da fatura anterior, créditos de estorno na listagem principal e taxas/impostos (ex: IOF).
+    2. Identifique o nome do banco emissor de forma clara e limpa (ex: 'Bradesco', 'Nubank', 'Itaú', 'Inter'). Não inclua 'S.A.' ou complementos.
+    3. Identifique o mês e o ano de referência da fatura com base no vencimento. O mês deve ser por extenso em português e minúsculo (ex: 'janeiro', 'junho') e o ano com 4 dígitos (ex: 2026).
+    4. Identifique o valor total final da fatura.
+    5. Para compras parceladas, extraia o nome do estabelecimento limpo e coloque a parcela no campo correspondente (ex: '01/02').
     
     Estrutura exata do JSON de saída:
     {
       "banco": "Nome do Banco",
-      "mes_fatura": "julho",
+      "mes_fatura": "junho",
+      "ano_fatura": 2026,
       "valor_total": 0000.00,
       "transacoes": [
         {
           "data": "DD/MM",
-          "estabelecimento": "NOME LIMPO (sem a parcela)",
+          "estabelecimento": "NOME DO ESTABELECIMENTO",
           "valor": 00.00,
-          "tipo": "Parcelado" (se houver parcela) ou "Normal",
-          "parcela": "X/Y" (ex: "08/12") ou "-"
+          "tipo": "Parcelado" ou "Normal",
+          "parcela": "X/Y" ou "-"
         }
       ]
     }

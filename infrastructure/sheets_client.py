@@ -3,7 +3,8 @@ import os
 from google.oauth2.service_account import Credentials
 from gspread_formatting import (
     cellFormat, textFormat, color, numberFormat,
-    format_cell_range, set_column_width
+    format_cell_range, set_column_width,
+    DataValidationRule, BooleanCondition, set_data_validation_for_cell_range
 )
 
 def update_google_sheet(dados_fatura: dict, sheet_url: str):
@@ -14,159 +15,131 @@ def update_google_sheet(dados_fatura: dict, sheet_url: str):
     client = gspread.authorize(credentials)
     spreadsheet = client.open_by_url(sheet_url)
 
-    # Identifica o mês detectado pela IA e padroniza a primeira letra em maiúscula
-    mes_fatura = dados_fatura.get("mes_fatura", "Fatura").capitalize()
-
-    # Tenta abrir a aba do mês. Se não existir, cria uma nova.
-    try:
-        worksheet = spreadsheet.worksheet(mes_fatura)
-        worksheet.clear() # Limpa se já existir para não duplicar dados
-    except gspread.exceptions.WorksheetNotFound:
-        worksheet = spreadsheet.add_worksheet(title=mes_fatura, rows="100", cols="15")
-
-    banco = dados_fatura.get("banco", "Desconhecido")
-    total = dados_fatura.get("valor_total", 0.0)
+    # 1. Metadados Padronizados
+    banco = dados_fatura.get("banco", "Desconhecido").strip().capitalize()
+    mes = dados_fatura.get("mes_fatura", "janeiro").strip().capitalize()
+    ano = dados_fatura.get("ano_fatura", 2026)
+    periodo = f"{mes}/{ano}"
     transacoes = dados_fatura.get("transacoes", [])
 
-    parcelados = [t for t in transacoes if t.get("tipo") == "Parcelado"]
-    total_normal = sum(float(t.get("valor", 0)) for t in transacoes if t.get("tipo") == "Normal")
-    total_parcelado = sum(float(t.get("valor", 0)) for t in parcelados)
+    # =========================================================================
+    # FASE 1: O BANCO DE DADOS CENTRAL (DB_Transacoes)
+    # =========================================================================
+    try:
+        db_sheet = spreadsheet.worksheet("DB_Transacoes")
+    except gspread.exceptions.WorksheetNotFound:
+        db_sheet = spreadsheet.add_worksheet(title="DB_Transacoes", rows="1000", cols="7")
+        db_sheet.append_row(["Banco", "Periodo", "Data", "Estabelecimento", "Tipo", "Parcela", "Valor"])
+        format_cell_range(db_sheet, "A1:G1", cellFormat(textFormat=textFormat(bold=True)))
 
-    # 1. Montando o cabeçalho estático
-    linhas_para_inserir = [
-        ["💳 Resumo da Fatura", "", "", "", "", "", "", "", "", "", ""],
-        ["Banco:", banco, "", "", "", "", "VALORES PARCELADOS", "", "", "", ""],
-        ["Valor Total:", total, "", "", "", "", "Valor Total:", total_parcelado, "", "", ""],
-        ["VALORES NORMAIS", total_normal, "", "", "", "", "", "", "", "", ""],
-        ["Data", "Estabelecimento", "Tipo", "Parcela", "Valor", "", "Data", "Estabelecimento", "Tipo", "Parcela", "Valor"]
-    ]
-
-    start_row = 6
-    max_len = max(len(transacoes), len(parcelados))
+    todos_registros = db_sheet.get_all_values()
+    linhas_filtradas = [todos_registros[0]] if todos_registros else [["Banco", "Periodo", "Data", "Estabelecimento", "Tipo", "Parcela", "Valor"]]
     
-    # Montando as linhas de transação (lado a lado)
-    for i in range(max_len):
-        row = []
-        
-        if i < len(transacoes):
-            t = transacoes[i]
-            row.extend([
-                t.get("data", ""), 
-                t.get("estabelecimento", ""), 
-                t.get("tipo", ""), 
-                t.get("parcela", "-"), 
-                float(t.get("valor", 0.0))
-            ])
-        else:
-            row.extend(["", "", "", "", ""]) 
-        
-        row.append("") # Divisória
-        
-        if i < len(parcelados):
-            p = parcelados[i]
-            row.extend([
-                p.get("data", ""), 
-                p.get("estabelecimento", ""), 
-                p.get("tipo", ""), 
-                p.get("parcela", "-"), 
-                float(p.get("valor", 0.0))
-            ])
-        else:
-            row.extend(["", "", "", "", ""]) 
+    # Conjunto para rastrear quais meses esse banco já tem (para criarmos o Dropdown)
+    periodos_deste_banco = set([periodo])
+
+    for linha in todos_registros[1:]:
+        if len(linha) >= 7:
+            linha_banco = str(linha[0]).strip()
+            linha_periodo = str(linha[1]).strip()
             
-        linhas_para_inserir.append(row)
+            if linha_banco.lower() == banco.lower() and linha_periodo.lower() == periodo.lower():
+                continue 
+            
+            if linha_banco.lower() == banco.lower():
+                periodos_deste_banco.add(linha_periodo)
 
-    worksheet.append_rows(linhas_para_inserir)
-    end_row = len(linhas_para_inserir)
+            linha_modificada = linha.copy()
+            linha_modificada[1] = f"'{linha_periodo}" if not linha_periodo.startswith("'") else linha_periodo
+            linhas_filtradas.append(linha_modificada)
 
-    # 2. Aplicando a formatação visual
-    format_cell_range(worksheet, "A1:E1", cellFormat(
-        backgroundColor=color(0.1, 0.1, 0.5), 
-        textFormat=textFormat(bold=True, foregroundColor=color(1, 1, 1), fontSize=12)
-    ))
-    format_cell_range(worksheet, "A2:A3", cellFormat(textFormat=textFormat(bold=True)))
-    format_cell_range(worksheet, "B3", cellFormat(
-        numberFormat=numberFormat(type="CURRENCY", pattern="R$#,##0.00"),
-        textFormat=textFormat(bold=True, foregroundColor=color(0.8, 0.2, 0.2)) 
-    ))
+    # Adiciona as transações atuais
+    for t in transacoes:
+        linhas_filtradas.append([
+            banco, 
+            f"'{periodo}", 
+            t.get("data", ""), t.get("estabelecimento", ""),
+            t.get("tipo", ""), t.get("parcela", "-"),
+            float(t.get("valor", 0.0))
+        ])
+
+    db_sheet.clear()
+    db_sheet.append_rows(linhas_filtradas, value_input_option="USER_ENTERED")
+
+    # =========================================================================
+    # FASE 2: O DASHBOARD DINÂMICO DO BANCO
+    # =========================================================================
+    try:
+        ws_banco = spreadsheet.worksheet(banco)
+    except gspread.exceptions.WorksheetNotFound:
+        ws_banco = spreadsheet.add_worksheet(title=banco, rows="100", cols="12")
+
+    ws_banco.clear()
+
+    layout_dashboard = [
+        [f"💳 Dashboard Dinâmico - {banco}", "", "", "", "", "", "VALORES PARCELADOS", "", "", "", ""],
+        ["Selecione o Período (Mês/Ano):", f"'{periodo}", "", "", "", "", "Valor Total:", f'=IFERROR(SUMIFS(DB_Transacoes!G:G; DB_Transacoes!A:A; "{banco}"; DB_Transacoes!B:B; B2; DB_Transacoes!E:E; "Parcelado"); 0)', "", "", ""],
+        ["Valor Total Geral:", f'=IFERROR(SUMIFS(DB_Transacoes!G:G; DB_Transacoes!A:A; "{banco}"; DB_Transacoes!B:B; B2); 0)', "", "", "", "", "", "", "", "", ""],
+        ["VALORES NORMAIS:", f'=IFERROR(SUMIFS(DB_Transacoes!G:G; DB_Transacoes!A:A; "{banco}"; DB_Transacoes!B:B; B2; DB_Transacoes!E:E; "Normal"); 0)', "", "", "", "", "", "", "", "", ""],
+        ["Data", "Estabelecimento", "Tipo", "Parcela", "Valor", "", "Data", "Estabelecimento", "Tipo", "Parcela", "Valor"],
+        [f'=IFERROR(FILTER(DB_Transacoes!C:G; DB_Transacoes!A:A="{banco}"; DB_Transacoes!B:B=B2); "")', "", "", "", "", "", f'=IFERROR(FILTER(DB_Transacoes!C:G; DB_Transacoes!A:A="{banco}"; DB_Transacoes!B:B=B2; DB_Transacoes!E:E="Parcelado"); "")', "", "", "", ""]
+    ]
     
-    format_cell_range(worksheet, "A4:A4", cellFormat(textFormat=textFormat(bold=True)))
-    format_cell_range(worksheet, "B4:B4", cellFormat(
-        numberFormat=numberFormat(type="CURRENCY", pattern="R$#,##0.00"),
-        textFormat=textFormat(bold=True, foregroundColor=color(0.8, 0.2, 0.2))
-    ))
+    ws_banco.append_rows(layout_dashboard, value_input_option="USER_ENTERED")
 
-    format_cell_range(worksheet, "G2:G3", cellFormat(textFormat=textFormat(bold=True)))
-    format_cell_range(worksheet, "H3:H3", cellFormat(
-        numberFormat=numberFormat(type="CURRENCY", pattern="R$#,##0.00"),
-        textFormat=textFormat(bold=True, foregroundColor=color(0.8, 0.2, 0.2))
-    ))
-
-    header_format = cellFormat(
-        backgroundColor=color(0.2, 0.2, 0.2), 
-        textFormat=textFormat(bold=True, foregroundColor=color(1, 1, 1))
+    # =========================================================================
+    # FASE 3: ESTILIZAÇÃO E DROPDOWN (Menu Suspenso)
+    # =========================================================================
+    
+    # Criando o Menu Suspenso na Célula B2 com base nos meses existentes
+    lista_periodos_ordenada = sorted(list(periodos_deste_banco))
+    regra_dropdown = DataValidationRule(
+        BooleanCondition('ONE_OF_LIST', lista_periodos_ordenada),
+        showCustomUi=True
     )
-    format_cell_range(worksheet, "A5:E5", header_format)
-    format_cell_range(worksheet, "G5:K5", header_format)
+    set_data_validation_for_cell_range(ws_banco, "B2", regra_dropdown)
 
-    if max_len > 0:
-        format_cell_range(worksheet, f"A{start_row}:A{end_row}", cellFormat(horizontalAlignment="CENTER"))
-        format_cell_range(worksheet, f"C{start_row}:D{end_row}", cellFormat(horizontalAlignment="CENTER"))
-        format_cell_range(worksheet, f"E{start_row}:E{end_row}", cellFormat(
-            numberFormat=numberFormat(type="CURRENCY", pattern="R$#,##0.00")
-        ))
+    # Estilização
+    format_cell_range(ws_banco, "A1:E1", cellFormat(backgroundColor=color(0.1, 0.1, 0.5), textFormat=textFormat(bold=True, foregroundColor=color(1, 1, 1), fontSize=12)))
+    format_cell_range(ws_banco, "A2:A4", cellFormat(textFormat=textFormat(bold=True)))
+    
+    # Formata a B2 explicitamente como TEXTO (com o pattern '@' exigido pela API)
+    format_cell_range(ws_banco, "B2", cellFormat(backgroundColor=color(0.9, 0.9, 1.0), textFormat=textFormat(bold=True), numberFormat=numberFormat(type="TEXT", pattern="@"))) 
+    
+    moeda_bold_vermelha = cellFormat(numberFormat=numberFormat(type="CURRENCY", pattern="R$#,##0.00"), textFormat=textFormat(bold=True, foregroundColor=color(0.8, 0.2, 0.2)))
+    format_cell_range(ws_banco, "B3:B4", moeda_bold_vermelha)
+    format_cell_range(ws_banco, "G2:G3", cellFormat(textFormat=textFormat(bold=True)))
+    format_cell_range(ws_banco, "H3", moeda_bold_vermelha)
 
-        if len(parcelados) > 0:
-            fim_direita = start_row + len(parcelados) - 1
-            format_cell_range(worksheet, f"G{start_row}:G{fim_direita}", cellFormat(horizontalAlignment="CENTER"))
-            format_cell_range(worksheet, f"I{start_row}:J{fim_direita}", cellFormat(horizontalAlignment="CENTER"))
-            format_cell_range(worksheet, f"K{start_row}:K{fim_direita}", cellFormat(
-                numberFormat=numberFormat(type="CURRENCY", pattern="R$#,##0.00")
-            ))
+    header_format = cellFormat(backgroundColor=color(0.2, 0.2, 0.2), textFormat=textFormat(bold=True, foregroundColor=color(1, 1, 1)))
+    format_cell_range(ws_banco, "A5:E5", header_format)
+    format_cell_range(ws_banco, "G5:K5", header_format)
 
-        for i, t in enumerate(transacoes):
-            current_row = start_row + i
-            if t.get("tipo") == "Parcelado":
-                format_cell_range(worksheet, f"A{current_row}:E{current_row}", cellFormat(
-                    backgroundColor=color(1.0, 0.95, 0.85)
-                ))
+    format_cell_range(ws_banco, "A6:A100", cellFormat(horizontalAlignment="CENTER"))
+    format_cell_range(ws_banco, "C6:D100", cellFormat(horizontalAlignment="CENTER"))
+    format_cell_range(ws_banco, "E6:E100", cellFormat(numberFormat=numberFormat(type="CURRENCY", pattern="R$#,##0.00")))
+    
+    format_cell_range(ws_banco, "G6:G100", cellFormat(horizontalAlignment="CENTER"))
+    format_cell_range(ws_banco, "I6:J100", cellFormat(horizontalAlignment="CENTER"))
+    format_cell_range(ws_banco, "K6:K100", cellFormat(numberFormat=numberFormat(type="CURRENCY", pattern="R$#,##0.00")))
 
-        if len(parcelados) > 0:
-            format_cell_range(worksheet, f"G{start_row}:K{fim_direita}", cellFormat(
-                backgroundColor=color(1.0, 0.95, 0.85)
-            ))
+    format_cell_range(ws_banco, "G6:K100", cellFormat(backgroundColor=color(1.0, 0.95, 0.85)))
 
-    set_column_width(worksheet, 'A', 80)
-    set_column_width(worksheet, 'B', 250)
-    set_column_width(worksheet, 'C', 100)
-    set_column_width(worksheet, 'D', 80)
-    set_column_width(worksheet, 'E', 100)
-    set_column_width(worksheet, 'F', 30)
-    set_column_width(worksheet, 'G', 80)
-    set_column_width(worksheet, 'H', 250)
-    set_column_width(worksheet, 'I', 100)
-    set_column_width(worksheet, 'J', 80)
-    set_column_width(worksheet, 'K', 100)
-
-    # =========================================================================
-    # 3. ORDENAÇÃO CRONOLÓGICA DAS ABAS
-    # =========================================================================
-    mapa_meses = {
-        "Janeiro": 1, "Fevereiro": 2, "Março": 3, "Marco": 3, "Abril": 4,
-        "Maio": 5, "Junho": 6, "Julho": 7, "Agosto": 8,
-        "Setembro": 9, "Outubro": 10, "Novembro": 11, "Dezembro": 12
-    }
+    set_column_width(ws_banco, 'A', 80)
+    set_column_width(ws_banco, 'B', 250)
+    set_column_width(ws_banco, 'C', 100)
+    set_column_width(ws_banco, 'D', 80)
+    set_column_width(ws_banco, 'E', 100)
+    set_column_width(ws_banco, 'F', 30) 
+    set_column_width(ws_banco, 'G', 80)
+    set_column_width(ws_banco, 'H', 250)
+    set_column_width(ws_banco, 'I', 100)
+    set_column_width(ws_banco, 'J', 80)
+    set_column_width(ws_banco, 'K', 100)
 
     try:
         todas_abas = spreadsheet.worksheets()
-        
-        # A função key verifica se a aba atual está no nosso dicionário.
-        # Se for um mês reconhecido, recebe o número correspondente (1 a 12).
-        # Se for um nome desconhecido (como "Sheet1"), recebe peso 99 e vai pro final.
-        todas_abas.sort(key=lambda ws: mapa_meses.get(ws.title.capitalize(), 99))
-        
-        # Dispara o comando para o Google Sheets rearranjar a barra inferior
+        todas_abas.sort(key=lambda ws: "0_DB" if ws.title == "DB_Transacoes" else ws.title)
         spreadsheet.reorder_worksheets(todas_abas)
-        print("Abas organizadas cronologicamente com sucesso!")
     except Exception as e:
-        print(f"Aviso: Não foi possível reordenar as abas: {e}")
+        print(f"Aviso ao organizar abas: {e}")

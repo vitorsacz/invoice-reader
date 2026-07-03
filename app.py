@@ -37,7 +37,22 @@ if uploaded_file is not None:
             st.warning("Nenhuma transação encontrada nesta fatura.")
             st.stop()
 
-        st.success(f"Fatura de {mes_detectado} detectada! {len(transacoes)} transações extraídas.")
+        try:
+            dados_estruturados = json.loads(json_response)
+            transacoes = dados_estruturados.get("transacoes", [])
+            banco_detectado = dados_estruturados.get("banco", "Banco")
+            mes_detectado = dados_estruturados.get("mes_fatura", "").capitalize()
+            ano_detectado = dados_estruturados.get("ano_fatura", "")
+            periodo_detectado = f"{mes_detectado}/{ano_detectado}"
+        except json.JSONDecodeError:
+            st.error("Erro ao interpretar a resposta da IA. Tente novamente.")
+            st.stop()
+
+        if not transacoes:
+            st.warning("Nenhuma transação encontrada nesta fatura.")
+            st.stop()
+
+        st.success(f"Fatura {banco_detectado} ({periodo_detectado}) detectada! {len(transacoes)} transações extraídas.")
         st.dataframe(transacoes, use_container_width=True)
         
         with st.spinner(f"Criando/Atualizando a aba '{mes_detectado}' no Google Sheets..."):
