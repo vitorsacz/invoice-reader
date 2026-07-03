@@ -79,7 +79,7 @@ def update_google_sheet(dados_fatura: dict, sheet_url: str):
     worksheet.append_rows(linhas_para_inserir)
     end_row = len(linhas_para_inserir)
 
-    # 2. Aplicando a formatação do Dashboard Duplo na aba específica
+    # 2. Aplicando a formatação visual
     format_cell_range(worksheet, "A1:E1", cellFormat(
         backgroundColor=color(0.1, 0.1, 0.5), 
         textFormat=textFormat(bold=True, foregroundColor=color(1, 1, 1), fontSize=12)
@@ -147,3 +147,26 @@ def update_google_sheet(dados_fatura: dict, sheet_url: str):
     set_column_width(worksheet, 'I', 100)
     set_column_width(worksheet, 'J', 80)
     set_column_width(worksheet, 'K', 100)
+
+    # =========================================================================
+    # 3. ORDENAÇÃO CRONOLÓGICA DAS ABAS
+    # =========================================================================
+    mapa_meses = {
+        "Janeiro": 1, "Fevereiro": 2, "Março": 3, "Marco": 3, "Abril": 4,
+        "Maio": 5, "Junho": 6, "Julho": 7, "Agosto": 8,
+        "Setembro": 9, "Outubro": 10, "Novembro": 11, "Dezembro": 12
+    }
+
+    try:
+        todas_abas = spreadsheet.worksheets()
+        
+        # A função key verifica se a aba atual está no nosso dicionário.
+        # Se for um mês reconhecido, recebe o número correspondente (1 a 12).
+        # Se for um nome desconhecido (como "Sheet1"), recebe peso 99 e vai pro final.
+        todas_abas.sort(key=lambda ws: mapa_meses.get(ws.title.capitalize(), 99))
+        
+        # Dispara o comando para o Google Sheets rearranjar a barra inferior
+        spreadsheet.reorder_worksheets(todas_abas)
+        print("Abas organizadas cronologicamente com sucesso!")
+    except Exception as e:
+        print(f"Aviso: Não foi possível reordenar as abas: {e}")
