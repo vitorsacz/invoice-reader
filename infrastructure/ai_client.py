@@ -16,12 +16,14 @@ def extract_transactions_with_ai(raw_text: str) -> str:
     Regras:
     1. Ignore pagamentos da fatura anterior e taxas (ex: IOF).
     2. Identifique o nome do banco emissor da fatura.
-    3. Identifique o valor total da fatura.
-    4. Para cada transação, verifique se há um indicador de parcela (ex: 01/10, 08/12, 2/03) no nome do estabelecimento.
+    3. Identifique o mês de referência da fatura (baseado na data de vencimento). Retorne APENAS o nome do mês em português, todo em letras minúsculas (ex: 'janeiro', 'fevereiro', 'julho').
+    4. Identifique o valor total da fatura.
+    5. Para cada transação, verifique se há um indicador de parcela (ex: 01/10, 08/12, 2/03) no nome do estabelecimento.
     
     Estrutura exata do JSON de saída:
     {
       "banco": "Nome do Banco",
+      "mes_fatura": "julho",
       "valor_total": 0000.00,
       "transacoes": [
         {
@@ -29,7 +31,7 @@ def extract_transactions_with_ai(raw_text: str) -> str:
           "estabelecimento": "NOME LIMPO (sem a parcela)",
           "valor": 00.00,
           "tipo": "Parcelado" (se houver parcela) ou "Normal",
-          "parcela": "X/Y" (ex: "08/12") ou nulo (se for normal)
+          "parcela": "X/Y" (ex: "08/12") ou "-"
         }
       ]
     }
