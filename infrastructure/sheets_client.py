@@ -7,6 +7,9 @@ from gspread_formatting import (
     DataValidationRule, BooleanCondition, set_data_validation_for_cell_range
 )
 
+HEADER_DB_TRANSACOES = ["Banco", "Periodo", "Data", "Estabelecimento", "Tipo", "Parcela", "Valor"]
+
+
 def update_google_sheet(dados_fatura: dict, sheet_url: str):
     credentials_path = os.path.join(os.path.dirname(__file__), "..", "credentials.json")
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
@@ -29,12 +32,14 @@ def update_google_sheet(dados_fatura: dict, sheet_url: str):
         db_sheet = spreadsheet.worksheet("DB_Transacoes")
     except gspread.exceptions.WorksheetNotFound:
         db_sheet = spreadsheet.add_worksheet(title="DB_Transacoes", rows="1000", cols="7")
-        db_sheet.append_row(["Banco", "Periodo", "Data", "Estabelecimento", "Tipo", "Parcela", "Valor"])
+        db_sheet.append_row(HEADER_DB_TRANSACOES)
         format_cell_range(db_sheet, "A1:G1", cellFormat(textFormat=textFormat(bold=True)))
 
     todos_registros = db_sheet.get_all_values()
-    linhas_filtradas = [todos_registros[0]] if todos_registros else [["Banco", "Periodo", "Data", "Estabelecimento", "Tipo", "Parcela", "Valor"]]
-    
+    # O cabecalho e sempre reescrito com o valor canonico (nunca reaproveitado de
+    # todos_registros[0]) para nao perpetuar um cabecalho vazio/corrompido indefinidamente.
+    linhas_filtradas = [HEADER_DB_TRANSACOES]
+
     # Conjunto para rastrear quais meses esse banco já tem (para criarmos o Dropdown)
     periodos_deste_banco = set([periodo])
 
@@ -55,11 +60,17 @@ def update_google_sheet(dados_fatura: dict, sheet_url: str):
 
     # Adiciona as transações atuais
     for t in transacoes:
+        parcela_raw = t.get("parcela", "-")
+        # Prefixa com apóstrofo para forçar o Google Sheets a tratar como TEXTO.
+        # Sem isso, valores como "01/02" são interpretados como DATA (USER_ENTERED)
+        # e viram números seriais aleatórios (ex: 46058) em vez de "01/02".
+        parcela_valor = f"'{parcela_raw}" if isinstance(parcela_raw, str) and not parcela_raw.startswith("'") else parcela_raw
+
         linhas_filtradas.append([
-            banco, 
-            f"'{periodo}", 
+            banco,
+            f"'{periodo}",
             t.get("data", ""), t.get("estabelecimento", ""),
-            t.get("tipo", ""), t.get("parcela", "-"),
+            t.get("tipo", ""), parcela_valor,
             float(t.get("valor", 0.0))
         ])
 
