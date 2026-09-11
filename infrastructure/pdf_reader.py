@@ -1,18 +1,14 @@
 import pdfplumber
-import os
 
-def extract_text_from_pdf(file_path: str) -> str:
+def extract_text_from_pdf(file_obj) -> str:
     """
-    Abre o arquivo PDF e extrai todo o texto contido nele.
-    Retorna uma string com o conteúdo bruto.
+    Lê o PDF diretamente da memória (upload do front-end) 
+    e extrai todo o texto contido nele.
     """
-    if not os.path.exists(file_path):
-        raise FileNotFoundError(f"O arquivo não foi encontrado no caminho: {file_path}")
-
     extracted_text = ""
     
-    # O context manager (with) garante que o arquivo será fechado corretamente
-    with pdfplumber.open(file_path) as pdf:
+    # pdfplumber consegue ler o objeto em memória nativamente
+    with pdfplumber.open(file_obj) as pdf:
         for page in pdf.pages:
             text = page.extract_text()
             if text:

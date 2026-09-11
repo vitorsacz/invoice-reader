@@ -1,5 +1,6 @@
+streamlit
 google-genai
 gspread
+gspread-formatting
 pdfplumber
 python-dotenv
-gspread-formatting
