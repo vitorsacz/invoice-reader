@@ -4,3 +4,5 @@ gspread
 gspread-formatting
 pdfplumber
 python-dotenv
+pandas==3.0.3
+altair==6.2.2
