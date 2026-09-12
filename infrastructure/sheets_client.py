@@ -7,15 +7,18 @@ from gspread_formatting import (
     DataValidationRule, BooleanCondition, set_data_validation_for_cell_range
 )
 
-HEADER_DB_TRANSACOES = ["Banco", "Periodo", "Data", "Estabelecimento", "Tipo", "Parcela", "Valor"]
+from core.models import HEADER_DB_TRANSACOES
+
+
+def get_gspread_client() -> gspread.Client:
+    credentials_path = os.path.join(os.path.dirname(__file__), "..", "credentials.json")
+    scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+    credentials = Credentials.from_service_account_file(credentials_path, scopes=scopes)
+    return gspread.authorize(credentials)
 
 
 def update_google_sheet(dados_fatura: dict, sheet_url: str):
-    credentials_path = os.path.join(os.path.dirname(__file__), "..", "credentials.json")
-    scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-    
-    credentials = Credentials.from_service_account_file(credentials_path, scopes=scopes)
-    client = gspread.authorize(credentials)
+    client = get_gspread_client()
     spreadsheet = client.open_by_url(sheet_url)
 
     # 1. Metadados Padronizados
